@@ -4,6 +4,7 @@
 
 pub(crate) mod arithmetic;
 mod cumulative;
+mod disjunctive;
 pub(crate) mod element;
 pub(crate) mod nogoods;
 mod reified_propagator;
