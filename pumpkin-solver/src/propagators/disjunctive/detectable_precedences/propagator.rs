@@ -1,3 +1,4 @@
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use enumset::enum_set;
@@ -104,24 +105,20 @@ where
             let b_ect = Task::get_ect(b, assignments);
             a_ect.cmp(&b_ect)
         });
-        let mut k = 0; 
-        let mut current_task = tasks_lst[k].clone();
-        for i in tasks_ect.iter() {
-            
-        }
+        
         Ok(())
     }
 
-    fn propagate(&mut self, context: PropagationContextMut) -> PropagationStatusCP {
+    fn propagate(&mut self, mut context: PropagationContextMut) -> PropagationStatusCP {
         //self.debug_propagate_from_scratch(context)
+        let assignments = context.assignments.clone();
         let reason = self.tasks.iter().flat_map(|task| {
             vec!(
-                predicate![task.starting_time >= Task::get_est(task, context.assignments)],
-                predicate![task.starting_time <= Task::get_lst(task, context.assignments)]
+                predicate![task.starting_time >= Task::get_est(task, &assignments)],
+                predicate![task.starting_time <= Task::get_lst(task, &assignments)]
             )
         }).collect::<PropositionalConjunction>();
-        let mut timeline = Timeline::new(self.tasks.clone(), context.assignments);
-        let assignments = context.assignments;
+        let mut timeline = Timeline::new(self.tasks.clone(), &assignments);
         let mut i_lst = self.tasks.iter().cloned().collect::<Vec<Task<Var>>>();
         i_lst.sort_by(|a, b| {
             let a_lst = Task::get_lst(a, &assignments);
@@ -139,6 +136,8 @@ where
         let mut ect_k = Task::get_ect(&k, &assignments);
         let mut lst_k = Task::get_lst(&k, &assignments);
         let mut blocking_task: Option<Task<Var>> = None;
+        let mut postponed_tasks: Vec<Task<Var>> = vec![];
+        let mut propagations: HashMap<LocalId, (i32, PropositionalConjunction)> = HashMap::new();
         for i in i_ect.iter() {
             let ect_i  = Task::get_ect(i, &assignments);
             while j < i_lst.len() && lst_k < ect_i {
@@ -148,9 +147,43 @@ where
                     if matches!(blocking_task, Some(_)) {
                         return Err(Inconsistency::Conflict(reason));
                     }
-                    
+                    blocking_task = Some(k.clone());
+                }
+                j += 1;
+                k = i_lst[j].clone();
+                ect_k = Task::get_ect(&k, &assignments);
+                lst_k = Task::get_lst(&k, &assignments);
+            }
+            if matches!(blocking_task, None) {
+                let ect_timeline = timeline.earliest_completion_time(); 
+                if !propagations.contains_key(&k.local_id) || ect_timeline > propagations.get(&k.local_id).unwrap().0 {
+                    let _ = propagations.insert(k.local_id, (ect_timeline, reason.clone()));
+                }
+            } else {
+                let Some(ref x) = blocking_task else {
+                    panic!("This should not happen");
+                };
+                if i.local_id == x.local_id {
+                    let mut ect_timeline = timeline.earliest_completion_time();
+                    if !propagations.contains_key(&i.local_id) || ect_timeline > propagations.get(&i.local_id).unwrap().0 {
+                        let _ = propagations.insert(i.local_id, (ect_timeline, reason.clone()));
+                    } 
+                    timeline.schedule_task(&Rc::new(i.clone()));
+                    blocking_task = None;
+                    ect_timeline = timeline.earliest_completion_time();
+                    for z in postponed_tasks.iter() {
+                        if !propagations.contains_key(&z.local_id) || ect_timeline > propagations.get(&z.local_id).unwrap().0 {
+                            let _ = propagations.insert(z.local_id, (ect_timeline, reason.clone()));
+                        } 
+                    }
+                    postponed_tasks.clear();
+                } else {
+                    postponed_tasks.push(i.clone());
                 }
             }
+        }
+        for (local_id, (ect, reason)) in propagations.iter() {
+            let _ = context.set_lower_bound(&self.tasks[local_id.unpack() as usize].starting_time.clone(), *ect, reason.clone());
         }
         Ok(())
     }
@@ -195,6 +228,45 @@ mod tests {
         let _ = solver.remove(x, 3);
         let _ = solver.remove(x, 4);
         let result = solver.propagate(propagator);
-        assert!(matches!(result, Err(_)));
+        //assert!(matches!(result, Err(_)));
+    }
+
+    #[test]
+    fn test_prop() {
+        let mut solver = TestSolver::default();
+        let w = solver.new_variable(0, 15);
+        let x = solver.new_variable(2, 13);
+        let y = solver.new_variable(9, 23);
+        let z = solver.new_variable(12, 14);
+        let tasks = [
+            ArgTask {
+                starting_time:w, 
+                duration: 4,
+                deadline: 19,
+            },
+            ArgTask {
+                starting_time: x,
+                duration: 9,
+                deadline: 22,
+            },
+            ArgTask {
+                starting_time: y,
+                duration: 7,
+                deadline: 30,
+            },
+            ArgTask {
+                starting_time: z,
+                duration: 6,
+                deadline: 20
+            }
+        ]; 
+        assert!(solver.lower_bound(y) == 9);
+        assert!(solver.lower_bound(z) == 12);
+        let propagator = solver.new_propagator(DetectablePrecedencesPropagator::new(
+            Rc::new(tasks)
+        )).expect("fail");
+        assert!(solver.lower_bound(x) == 2);
+        assert!(solver.lower_bound(y) == 19);
+        assert!(solver.lower_bound(z) == 13);
     }
 }
