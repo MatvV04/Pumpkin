@@ -1,4 +1,4 @@
-pub (crate) use detectable_precedences::*;
+pub(crate) use detectable_precedences::*;
+mod detectable_precedences;
 mod utils;
-mod detectable_precedences; 
-pub (crate) use utils::*;
+pub(crate) use utils::*;
