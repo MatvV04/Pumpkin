@@ -9,7 +9,6 @@ use crate::variables::IntegerVariable;
 pub(crate) struct TaskDisj<Var> {
     pub(crate) starting_time: Var,
     pub(crate) duration: i32,
-    pub(crate) deadline: i32,
     pub(crate) local_id: LocalId,
 }
 
@@ -39,7 +38,6 @@ impl<Var> Debug for TaskDisj<Var> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Task")
             .field("duration", &self.duration)
-            .field("deadline", &self.deadline)
             .field("local_id", &self.local_id)
             .finish()
     }
@@ -48,5 +46,4 @@ impl<Var> Debug for TaskDisj<Var> {
 pub(crate) struct ArgTaskDisj<Var> {
     pub(crate) starting_time: Var,
     pub(crate) duration: i32,
-    pub(crate) deadline: i32,
 }

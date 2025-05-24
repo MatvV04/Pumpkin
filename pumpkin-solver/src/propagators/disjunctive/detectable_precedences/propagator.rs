@@ -5,6 +5,7 @@ use enumset::enum_set;
 
 use crate::basic_types::Inconsistency;
 use crate::basic_types::PropagationStatusCP;
+use crate::conjunction;
 use crate::engine::opaque_domain_event::OpaqueDomainEvent;
 use crate::engine::propagation::contexts::PropagationContextWithTrailedValues;
 use crate::engine::propagation::EnqueueDecision;
@@ -18,9 +19,9 @@ use crate::engine::IntDomainEvent;
 use crate::predicate;
 use crate::predicates::PropositionalConjunction;
 use crate::propagators::disjunctive::ArgTaskDisj;
-use crate::propagators::disjunctive::RevTimeline;
 use crate::propagators::disjunctive::TaskDisj;
 use crate::propagators::disjunctive::Timeline;
+use crate::propagators::RevTimeline;
 use crate::variables::IntegerVariable;
 
 #[derive(Clone, Debug)]
@@ -32,7 +33,7 @@ impl<Var> DetectablePrecedencesPropagator<Var>
 where
     Var: IntegerVariable + 'static,
 {
-    pub(crate) fn new(tasks: Rc<[ArgTaskDisj<Var>]>) -> Self {
+    pub(crate) fn new(tasks: Rc<Vec<ArgTaskDisj<Var>>>) -> Self {
         DetectablePrecedencesPropagator {
             tasks: tasks
                 .iter()
@@ -40,15 +41,12 @@ where
                 .map(|(i, task)| TaskDisj {
                     starting_time: task.starting_time.clone(),
                     duration: task.duration,
-                    deadline: task.deadline,
                     local_id: LocalId::from(i as u32),
                 })
                 .collect(),
         }
     }
-
-
-    fn propagate_upper_bound(&mut self, mut context: PropagationContextMut) -> PropagationStatusCP{
+    fn propagate_upper_bound(&mut self, mut context: PropagationContextMut) -> Result<(), Inconsistency> {
         let assignments = context.assignments.clone();
         let reason = self
             .tasks
@@ -82,12 +80,18 @@ where
         let mut propagations: HashMap<LocalId, (i32, PropositionalConjunction)> = HashMap::new();
         for i in i_lst.iter() {
             let lst_i = TaskDisj::get_lst(i, &assignments);
-            while j < i_lst.len() && ect_k > lst_i {
+            while j < i_lst.len() - 1 && ect_k > lst_i {
                 if lst_k >= ect_k {
                     timeline.schedule_task(&Rc::new(k.clone()));
                 } else {
                     if matches!(blocking_task, Some(_)) {
-                        return Err(Inconsistency::Conflict(reason));
+                        let block_task = blocking_task.clone().unwrap();
+                        let r = conjunction!(
+                            [block_task.starting_time >= TaskDisj::get_est(&block_task, &assignments)] & [block_task.starting_time <= TaskDisj::get_lst(&block_task, &assignments)] &
+                            [k.starting_time >= TaskDisj::get_est(&k, &assignments)] &
+                            [k.starting_time <= TaskDisj::get_lst(&k, &assignments)]
+                        );
+                        return Err(Inconsistency::Conflict(r));
                     }
                     blocking_task = Some(k.clone());
                 }
@@ -134,13 +138,16 @@ where
             if *lst >= TaskDisj::get_lst(&self.tasks[local_id.unpack() as usize], &assignments) {
                 continue;
             }
-            let _ = context.set_upper_bound(
+            let x = context.set_upper_bound(
                 &self.tasks[local_id.unpack() as usize].starting_time.clone(),
                 *lst,
                 reason.clone(),
             );
+            if matches!(x, Err(_)) {
+                return Err(Inconsistency::Conflict(reason.clone()));
+            }
         }
-        Ok(())
+        Ok(())    
     }
 }
 
@@ -179,16 +186,19 @@ where
         self.tasks.iter().for_each(|task| {
             let _ = context.register(
                 task.starting_time.clone(),
-                DomainEvents::ASSIGN,
+                DomainEvents::create_with_int_events(enum_set!(
+                    IntDomainEvent::LowerBound | IntDomainEvent::UpperBound
+                )),
+                
                 task.local_id,
             );
-            let _ = context.register_for_backtrack_events(
+            /*let _ = context.register_for_backtrack_events(
                 task.starting_time.clone(),
                 DomainEvents::create_with_int_events(enum_set!(
                     IntDomainEvent::Assign | IntDomainEvent::Removal
                 )),
                 task.local_id,
-            );
+            );*/
         });
         Ok(())
     }
@@ -198,7 +208,7 @@ where
         for task in self.tasks.iter() {
             let ect = TaskDisj::get_ect(task, &assignments);
             let lst = TaskDisj::get_lst(task, &assignments);
-            if ect > task.deadline {
+            if ect > TaskDisj::get_lct(task, &assignments) {
                 let reason: PropositionalConjunction =
                     predicate![task.starting_time >= lst - 1].into();
                 return Err(Inconsistency::Conflict(reason));
@@ -243,11 +253,18 @@ where
         let mut propagations: HashMap<LocalId, (i32, PropositionalConjunction)> = HashMap::new();
         for i in i_ect.iter() {
             let ect_i = TaskDisj::get_ect(i, &assignments);
-            while j < i_lst.len() && lst_k < ect_i {
+            while j < i_lst.len() - 1 && lst_k < ect_i {
                 if lst_k >= ect_k {
                     timeline.schedule_task(&Rc::new(k.clone()));
                 } else {
                     if matches!(blocking_task, Some(_)) {
+                        let block_task = blocking_task.clone().unwrap();
+                        let r = conjunction!(
+                            [block_task.starting_time >= TaskDisj::get_est(&block_task, &assignments)] & [block_task.starting_time <= TaskDisj::get_lst(&block_task, &assignments)] &
+                            [k.starting_time >= TaskDisj::get_est(&k, &assignments)] &
+                            [k.starting_time <= TaskDisj::get_lst(&k, &assignments)]
+                        );
+                        return Err(Inconsistency::Conflict(r));
                         return Err(Inconsistency::Conflict(reason));
                     }
                     blocking_task = Some(k.clone());
@@ -292,18 +309,20 @@ where
             }
         }
         for (local_id, (ect, reason)) in propagations.iter() {
-            let _ = context.set_lower_bound(
+            if *ect <= TaskDisj::get_est(&self.tasks[local_id.unpack() as usize], &assignments) {
+                continue;
+            }
+            let x = context.set_lower_bound(
                 &self.tasks[local_id.unpack() as usize].starting_time.clone(),
                 *ect,
                 reason.clone(),
             );
+            if matches!(x, Err(_)) {
+                return Err(Inconsistency::Conflict(reason.clone()));
+            }
         }
-       self.propagate_upper_bound(context)
-       
+        self.propagate_upper_bound(context) 
     }
-
-
-    
 }
 
 #[cfg(test)]
@@ -323,10 +342,9 @@ mod tests {
         let x = solver.new_variable(5, 8);
 
         let propagator = solver
-            .new_propagator(DetectablePrecedencesPropagator::new(Rc::new([ArgTaskDisj {
+            .new_propagator(DetectablePrecedencesPropagator::new(Rc::new(vec![ArgTaskDisj {
                 starting_time: x.clone(),
                 duration: 2,
-                deadline: 10,
             }])))
             .expect("fail");
         let result = solver.propagate(propagator);
@@ -338,10 +356,9 @@ mod tests {
         let x = solver.new_variable(3, 8);
 
         let propagator = solver
-            .new_propagator(DetectablePrecedencesPropagator::new(Rc::new([ArgTaskDisj {
+            .new_propagator(DetectablePrecedencesPropagator::new(Rc::new(vec![ArgTaskDisj {
                 starting_time: x.clone(),
                 duration: 2,
-                deadline: 6,
             }])))
             .expect("fail");
         let _ = solver.remove(x, 3);
@@ -357,26 +374,22 @@ mod tests {
         let x = solver.new_variable(2, 13);
         let y = solver.new_variable(9, 23);
         let z = solver.new_variable(12, 14);
-        let tasks = [
+        let tasks = vec![
             ArgTaskDisj {
                 starting_time: w,
                 duration: 4,
-                deadline: 19,
             },
             ArgTaskDisj {
                 starting_time: x,
                 duration: 9,
-                deadline: 22,
             },
             ArgTaskDisj {
                 starting_time: y,
                 duration: 7,
-                deadline: 30,
             },
             ArgTaskDisj {
                 starting_time: z,
                 duration: 6,
-                deadline: 20,
             },
         ];
         assert!(solver.lower_bound(y) == 9);
@@ -387,8 +400,6 @@ mod tests {
         assert!(solver.lower_bound(x) == 2);
         assert!(solver.lower_bound(y) == 19);
         assert!(solver.lower_bound(z) == 13);
-        assert!(solver.upper_bound(w) == 10);
-        assert!(solver.upper_bound(x) == 5);
     }
 
     #[test]
@@ -398,26 +409,22 @@ mod tests {
         let x = solver.new_variable(3,5);
         let y = solver.new_variable(7, 10);
         let z = solver.new_variable(4, 18);
-        let tasks = [
+        let tasks = vec![
             ArgTaskDisj {
                 starting_time: w,
                 duration: 2,
-                deadline: 6,
             },
             ArgTaskDisj {
                 starting_time: x,
                 duration: 5,
-                deadline: 10,
             },
             ArgTaskDisj {
                 starting_time: y,
                 duration: 5,
-                deadline: 15,
             },
             ArgTaskDisj {
                 starting_time: z,
                 duration: 2,
-                deadline: 20,
             },
         ];
         let propagator = solver

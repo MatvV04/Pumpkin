@@ -1,4 +1,4 @@
-mod task;
+pub(crate) mod task;
 pub(crate) use task::*;
 mod timeline;
 pub(crate) use timeline::*;

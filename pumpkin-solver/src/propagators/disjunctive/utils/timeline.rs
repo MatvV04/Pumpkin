@@ -227,18 +227,15 @@ mod tests {
             TaskDisj {
                 starting_time: x,
                 duration: 5,
-                deadline: 15,
                 local_id: LocalId::from(0),
             },
             TaskDisj {
                 starting_time: y,
                 duration: 6,
-                deadline: 10,
                 local_id: LocalId::from(1),
             },
             TaskDisj {
                 starting_time: z,
-                deadline: 8,
                 duration: 2,
                 local_id: LocalId::from(2),
             },
@@ -267,24 +264,20 @@ mod tests {
             TaskDisj {
                 starting_time: w,
                 duration: 4,
-                deadline: 19,
                 local_id: LocalId::from(0),
             },
             TaskDisj {
                 starting_time: x,
                 duration: 9,
-                deadline: 22,
                 local_id: LocalId::from(1),
             },
             TaskDisj {
                 starting_time: y,
                 duration: 7,
-                deadline: 30,
                 local_id: LocalId::from(2),
             },
             TaskDisj {
                 starting_time: z,
-                deadline: 20,
                 duration: 6,
                 local_id: LocalId::from(3),
             },
