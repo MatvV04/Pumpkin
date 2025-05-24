@@ -48,16 +48,6 @@ where
     }
     fn propagate_upper_bound(&mut self, mut context: PropagationContextMut) -> Result<(), Inconsistency> {
         let assignments = context.assignments.clone();
-        let reason = self
-            .tasks
-            .iter()
-            .flat_map(|task| {
-                vec![
-                    predicate![task.starting_time >= TaskDisj::get_est(task, &assignments)],
-                    predicate![task.starting_time <= TaskDisj::get_lst(task, &assignments)],
-                ]
-            })
-            .collect::<PropositionalConjunction>();
         let mut timeline = RevTimeline::new(self.tasks.clone(), &assignments);
         let mut i_lst = self.tasks.iter().cloned().collect::<Vec<TaskDisj<Var>>>();
         i_lst.sort_by(|a, b| {
@@ -82,7 +72,7 @@ where
             let lst_i = TaskDisj::get_lst(i, &assignments);
             while j < i_lst.len() - 1 && ect_k > lst_i {
                 if lst_k >= ect_k {
-                    timeline.schedule_task(&Rc::new(k.clone()));
+                    timeline.schedule_task(&Rc::new(k.clone()), &assignments);
                 } else {
                     if matches!(blocking_task, Some(_)) {
                         let block_task = blocking_task.clone().unwrap();
@@ -105,7 +95,11 @@ where
                 if !propagations.contains_key(&i.local_id)
                     || lst_timeline - i.duration < propagations.get(&i.local_id).unwrap().0
                 {
-                    let _ = propagations.insert(i.local_id, (lst_timeline - i.duration, reason.clone()));
+                    let mut reason: PropositionalConjunction = timeline.scheduled_tasks_exp.clone();
+                    reason.add(predicate![
+                        i.starting_time <= TaskDisj::get_lst(&i, &assignments)
+                    ]);
+                    let _ = propagations.insert(i.local_id, (lst_timeline - i.duration, reason));
                 }
             } else {
                 let Some(ref x) = blocking_task else {
@@ -116,16 +110,24 @@ where
                     if !propagations.contains_key(&i.local_id)
                         || lst_timeline - i.duration < propagations.get(&i.local_id).unwrap().0
                     {
-                        let _ = propagations.insert(i.local_id, (lst_timeline - i.duration, reason.clone()));
+                        let mut reason: PropositionalConjunction = timeline.scheduled_tasks_exp.clone();
+                        reason.add(predicate![
+                            i.starting_time <= TaskDisj::get_lst(&i, &assignments)
+                        ]);
+                        let _ = propagations.insert(i.local_id, (lst_timeline - i.duration, reason));
                     }
-                    timeline.schedule_task(&Rc::new(i.clone()));
+                    timeline.schedule_task(&Rc::new(i.clone()), &assignments);
                     blocking_task = None;
                     lst_timeline = timeline.latest_starting_time();
                     for z in postponed_tasks.iter() {
                         if !propagations.contains_key(&z.local_id)
                             || lst_timeline - z.duration < propagations.get(&z.local_id).unwrap().0
                         {
-                            let _ = propagations.insert(z.local_id, (lst_timeline - z.duration, reason.clone()));
+                            let mut reason: PropositionalConjunction = timeline.scheduled_tasks_exp.clone();
+                            reason.add(predicate![
+                                z.starting_time <= TaskDisj::get_lst(&z, &assignments)
+                            ]);
+                            let _ = propagations.insert(z.local_id, (lst_timeline - z.duration, reason));
                         }
                     }
                     postponed_tasks.clear();
@@ -221,16 +223,6 @@ where
     fn propagate(&mut self, mut context: PropagationContextMut) -> PropagationStatusCP {
         // self.debug_propagate_from_scratch(context)
         let assignments = context.assignments.clone();
-        let reason = self
-            .tasks
-            .iter()
-            .flat_map(|task| {
-                vec![
-                    predicate![task.starting_time >= TaskDisj::get_est(task, &assignments)],
-                    predicate![task.starting_time <= TaskDisj::get_lst(task, &assignments)],
-                ]
-            })
-            .collect::<PropositionalConjunction>();
         let mut timeline = Timeline::new(self.tasks.clone(), &assignments);
         let mut i_lst = self.tasks.iter().cloned().collect::<Vec<TaskDisj<Var>>>();
         i_lst.sort_by(|a, b| {
@@ -255,7 +247,7 @@ where
             let ect_i = TaskDisj::get_ect(i, &assignments);
             while j < i_lst.len() - 1 && lst_k < ect_i {
                 if lst_k >= ect_k {
-                    timeline.schedule_task(&Rc::new(k.clone()));
+                    timeline.schedule_task(&Rc::new(k.clone()), &assignments);
                 } else {
                     if matches!(blocking_task, Some(_)) {
                         let block_task = blocking_task.clone().unwrap();
@@ -265,7 +257,6 @@ where
                             [k.starting_time <= TaskDisj::get_lst(&k, &assignments)]
                         );
                         return Err(Inconsistency::Conflict(r));
-                        return Err(Inconsistency::Conflict(reason));
                     }
                     blocking_task = Some(k.clone());
                 }
@@ -279,7 +270,11 @@ where
                 if !propagations.contains_key(&i.local_id)
                     || ect_timeline > propagations.get(&i.local_id).unwrap().0
                 {
-                    let _ = propagations.insert(i.local_id, (ect_timeline, reason.clone()));
+                    let mut reason: PropositionalConjunction = timeline.scheduled_tasks_exp.clone();
+                    reason.add(predicate![
+                        i.starting_time >= TaskDisj::get_est(&i, &assignments)
+                    ]);
+                    let _ = propagations.insert(i.local_id, (ect_timeline, reason));
                 }
             } else {
                 let Some(ref x) = blocking_task else {
@@ -290,16 +285,24 @@ where
                     if !propagations.contains_key(&i.local_id)
                         || ect_timeline > propagations.get(&i.local_id).unwrap().0
                     {
-                        let _ = propagations.insert(i.local_id, (ect_timeline, reason.clone()));
+                        let mut reason: PropositionalConjunction = timeline.scheduled_tasks_exp.clone();
+                        reason.add(predicate![
+                            i.starting_time >= TaskDisj::get_est(&i, &assignments)
+                        ]);
+                        let _ = propagations.insert(i.local_id, (ect_timeline, reason));
                     }
-                    timeline.schedule_task(&Rc::new(i.clone()));
+                    timeline.schedule_task(&Rc::new(i.clone()), &assignments);
                     blocking_task = None;
                     ect_timeline = timeline.earliest_completion_time();
                     for z in postponed_tasks.iter() {
                         if !propagations.contains_key(&z.local_id)
                             || ect_timeline > propagations.get(&z.local_id).unwrap().0
                         {
-                            let _ = propagations.insert(z.local_id, (ect_timeline, reason.clone()));
+                            let mut reason: PropositionalConjunction = timeline.scheduled_tasks_exp.clone();
+                            reason.add(predicate![
+                                z.starting_time >= TaskDisj::get_est(&z, &assignments)
+                            ]);
+                            let _ = propagations.insert(z.local_id, (ect_timeline, reason));
                         }
                     }
                     postponed_tasks.clear();

@@ -6,6 +6,8 @@ use std::rc::Rc;
 
 use super::TaskDisj;
 use super::UnionFind;
+use crate::predicate;
+use crate::predicates::PropositionalConjunction;
 use crate::{engine::Assignments, variables::IntegerVariable};
 
 pub(crate) struct Timeline {
@@ -14,6 +16,7 @@ pub(crate) struct Timeline {
     pub(crate) m: Vec<i32>,
     pub(crate) e: i32,
     pub(crate) s: UnionFind,
+    pub(crate) scheduled_tasks_exp: PropositionalConjunction,
 }
 
 impl Timeline {
@@ -51,12 +54,14 @@ impl Timeline {
             m: m,
             e: -1,
             s: UnionFind::new(n as i32),
+            scheduled_tasks_exp: PropositionalConjunction::new(vec![]),
         }
     }
 
     pub(crate) fn schedule_task<Var: IntegerVariable + 'static>(
         &mut self,
         task: &Rc<TaskDisj<Var>>,
+        assignments: &Assignments
     ) -> () {
         let mut rho = task.duration;
         let mut k = self.s.find(self.m[TaskDisj::get_id(task)]) as usize;
@@ -71,6 +76,8 @@ impl Timeline {
             }
         }
         self.e = max(self.e, k as i32);
+        self.scheduled_tasks_exp.add(predicate![task.starting_time >= TaskDisj::get_est(task, &assignments)]);
+        self.scheduled_tasks_exp.add(predicate![task.starting_time <= TaskDisj::get_lst(task, &assignments)]);
     }
 
     pub(crate) fn earliest_completion_time(&self) -> i32 {
@@ -112,6 +119,7 @@ pub(crate) struct RevTimeline {
     pub(crate) m: Vec<i32>,
     pub(crate) e: i32,
     pub(crate) s: UnionFind,
+    pub(crate) scheduled_tasks_exp: PropositionalConjunction,
 }
 
 impl RevTimeline {
@@ -152,12 +160,14 @@ impl RevTimeline {
             m: m,
             e: -1,
             s: UnionFind::new(n as i32),
+            scheduled_tasks_exp: PropositionalConjunction::new(vec![]),
         }
     }
 
     pub(crate) fn schedule_task<Var: IntegerVariable + 'static>(
         &mut self,
         task: &Rc<TaskDisj<Var>>,
+        assignments: &Assignments
     ) -> () {
         let mut rho = task.duration;
         let mut k = self.s.find(self.m[TaskDisj::get_id(task)]) as usize;
@@ -172,6 +182,9 @@ impl RevTimeline {
             }
         }
         self.e = max(self.e, k as i32);
+        self.scheduled_tasks_exp.add(predicate![task.starting_time >= TaskDisj::get_est(task, &assignments)]);
+        self.scheduled_tasks_exp.add(predicate![task.starting_time <= TaskDisj::get_lst(task, &assignments)]);
+
     }
 
     pub(crate) fn latest_starting_time(&self) -> i32 {
@@ -243,13 +256,13 @@ mod tests {
         let mut timeline = Timeline::new(Rc::new(tasks.clone()), &solver.assignments);
         println!("{:?}", timeline);
         timeline.print_uf();
-        timeline.schedule_task(&Rc::new(tasks[0].clone()));
+        timeline.schedule_task(&Rc::new(tasks[0].clone() ), &solver.assignments);
         println!("{:?}", timeline);
         timeline.print_uf();
         assert!(timeline.earliest_completion_time() == 9);
-        timeline.schedule_task(&Rc::new(tasks[1].clone()));
+        timeline.schedule_task(&Rc::new(tasks[1].clone()), &solver.assignments);
         assert!(timeline.earliest_completion_time() == 12);
-        timeline.schedule_task(&Rc::new(tasks[2].clone()));
+        timeline.schedule_task(&Rc::new(tasks[2].clone()), &solver.assignments);
         assert!(timeline.earliest_completion_time() == 14);
     }
 
@@ -286,11 +299,11 @@ mod tests {
         println!("{:?}", timeline);
         timeline.print_uf();
 
-        timeline.schedule_task(&Rc::new(tasks[2].clone()));
+        timeline.schedule_task(&Rc::new(tasks[2].clone()), &solver.assignments);
         println!("{:?}", timeline);
         timeline.print_uf();
         assert!(timeline.latest_starting_time() == 23);
-        timeline.schedule_task(&Rc::new(tasks[1].clone()));
+        timeline.schedule_task(&Rc::new(tasks[1].clone()), &solver.assignments);
         println!("{:?}", timeline);
         timeline.print_uf();
         assert!(timeline.latest_starting_time() == 13);
