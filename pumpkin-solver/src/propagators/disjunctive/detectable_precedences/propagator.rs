@@ -7,6 +7,7 @@ use crate::basic_types::Inconsistency;
 use crate::basic_types::PropagationStatusCP;
 use crate::conjunction;
 use crate::engine::opaque_domain_event::OpaqueDomainEvent;
+use crate::engine::predicates::predicate;
 use crate::engine::propagation::contexts::PropagationContextWithTrailedValues;
 use crate::engine::propagation::EnqueueDecision;
 use crate::engine::propagation::LocalId;
@@ -14,6 +15,7 @@ use crate::engine::propagation::PropagationContext;
 use crate::engine::propagation::PropagationContextMut;
 use crate::engine::propagation::Propagator;
 use crate::engine::propagation::PropagatorInitialisationContext;
+use crate::engine::Assignments;
 use crate::engine::DomainEvents;
 use crate::engine::IntDomainEvent;
 use crate::predicate;
@@ -95,10 +97,7 @@ where
                 if !propagations.contains_key(&i.local_id)
                     || lst_timeline - i.duration < propagations.get(&i.local_id).unwrap().0
                 {
-                    let mut reason: PropositionalConjunction = timeline.scheduled_tasks_exp.clone();
-                    reason.add(predicate![
-                        i.starting_time <= TaskDisj::get_lst(&i, &assignments)
-                    ]);
+                    let reason = self.generate_explanation_right(i, &timeline, &assignments);
                     let _ = propagations.insert(i.local_id, (lst_timeline - i.duration, reason));
                 }
             } else {
@@ -110,10 +109,7 @@ where
                     if !propagations.contains_key(&i.local_id)
                         || lst_timeline - i.duration < propagations.get(&i.local_id).unwrap().0
                     {
-                        let mut reason: PropositionalConjunction = timeline.scheduled_tasks_exp.clone();
-                        reason.add(predicate![
-                            i.starting_time <= TaskDisj::get_lst(&i, &assignments)
-                        ]);
+                        let reason = self.generate_explanation_right(i, &timeline, &assignments);
                         let _ = propagations.insert(i.local_id, (lst_timeline - i.duration, reason));
                     }
                     timeline.schedule_task(&Rc::new(i.clone()), &assignments);
@@ -123,10 +119,7 @@ where
                         if !propagations.contains_key(&z.local_id)
                             || lst_timeline - z.duration < propagations.get(&z.local_id).unwrap().0
                         {
-                            let mut reason: PropositionalConjunction = timeline.scheduled_tasks_exp.clone();
-                            reason.add(predicate![
-                                z.starting_time <= TaskDisj::get_lst(&z, &assignments)
-                            ]);
+                            let reason = self.generate_explanation_right(z, &timeline, &assignments);
                             let _ = propagations.insert(z.local_id, (lst_timeline - z.duration, reason));
                         }
                     }
@@ -137,19 +130,38 @@ where
             }
         }
         for (local_id, (lst, reason)) in propagations.iter() {
-            if *lst >= TaskDisj::get_lst(&self.tasks[local_id.unpack() as usize], &assignments) {
+            let task = &self.tasks[local_id.unpack() as usize];
+            if *lst >= TaskDisj::get_lst(task, &assignments) {
                 continue;
             }
             let x = context.set_upper_bound(
-                &self.tasks[local_id.unpack() as usize].starting_time.clone(),
+                &task.starting_time.clone(),
                 *lst,
                 reason.clone(),
             );
             if matches!(x, Err(_)) {
-                return Err(Inconsistency::Conflict(reason.clone()));
+                let mut conflict_reason = reason.clone();
+                conflict_reason.add(predicate![task.starting_time >= TaskDisj::get_est(task, &assignments)]);
+                return Err(Inconsistency::Conflict(conflict_reason));
             }
         }
         Ok(())    
+    }
+
+    fn generate_explanation_left(&self, task: &TaskDisj<Var>, timeline: &Timeline, assignments: &Assignments) -> PropositionalConjunction {
+        let mut reason = timeline.scheduled_tasks_exp.clone();
+        reason.add(predicate![
+            task.starting_time >= TaskDisj::get_est(task, assignments)
+        ]);
+        reason
+    }
+
+    fn generate_explanation_right(&self, task: &TaskDisj<Var>, timeline: &RevTimeline, assignments: &Assignments) -> PropositionalConjunction {
+        let mut reason = timeline.scheduled_tasks_exp.clone();
+        reason.add(predicate![
+            task.starting_time <= TaskDisj::get_lst(task, assignments)
+        ]);
+        reason
     }
 }
 
@@ -270,10 +282,8 @@ where
                 if !propagations.contains_key(&i.local_id)
                     || ect_timeline > propagations.get(&i.local_id).unwrap().0
                 {
-                    let mut reason: PropositionalConjunction = timeline.scheduled_tasks_exp.clone();
-                    reason.add(predicate![
-                        i.starting_time >= TaskDisj::get_est(&i, &assignments)
-                    ]);
+                    
+                    let reason = self.generate_explanation_left(i, &timeline, &assignments);
                     let _ = propagations.insert(i.local_id, (ect_timeline, reason));
                 }
             } else {
@@ -285,10 +295,7 @@ where
                     if !propagations.contains_key(&i.local_id)
                         || ect_timeline > propagations.get(&i.local_id).unwrap().0
                     {
-                        let mut reason: PropositionalConjunction = timeline.scheduled_tasks_exp.clone();
-                        reason.add(predicate![
-                            i.starting_time >= TaskDisj::get_est(&i, &assignments)
-                        ]);
+                        let reason = self.generate_explanation_left(i, &timeline, &assignments);
                         let _ = propagations.insert(i.local_id, (ect_timeline, reason));
                     }
                     timeline.schedule_task(&Rc::new(i.clone()), &assignments);
@@ -298,10 +305,7 @@ where
                         if !propagations.contains_key(&z.local_id)
                             || ect_timeline > propagations.get(&z.local_id).unwrap().0
                         {
-                            let mut reason: PropositionalConjunction = timeline.scheduled_tasks_exp.clone();
-                            reason.add(predicate![
-                                z.starting_time >= TaskDisj::get_est(&z, &assignments)
-                            ]);
+                            let reason = self.generate_explanation_left(z, &timeline, &assignments);
                             let _ = propagations.insert(z.local_id, (ect_timeline, reason));
                         }
                     }
@@ -312,16 +316,19 @@ where
             }
         }
         for (local_id, (ect, reason)) in propagations.iter() {
-            if *ect <= TaskDisj::get_est(&self.tasks[local_id.unpack() as usize], &assignments) {
+            let task = &self.tasks[local_id.unpack() as usize];
+            if *ect <= TaskDisj::get_est(task, &assignments) {
                 continue;
             }
             let x = context.set_lower_bound(
-                &self.tasks[local_id.unpack() as usize].starting_time.clone(),
+                &task.starting_time.clone(),
                 *ect,
                 reason.clone(),
             );
             if matches!(x, Err(_)) {
-                return Err(Inconsistency::Conflict(reason.clone()));
+                let mut conflict_reason = reason.clone();
+                conflict_reason.add(predicate![task.starting_time <= TaskDisj::get_lst(task, &assignments)]);
+                return Err(Inconsistency::Conflict(conflict_reason));
             }
         }
         self.propagate_upper_bound(context) 
