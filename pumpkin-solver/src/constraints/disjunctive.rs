@@ -5,6 +5,7 @@ use std::rc::Rc;
 use super::Constraint;
 use crate::propagators::disjunctive::utils::task::ArgTaskDisj;
 use crate::propagators::disjunctive::detectable_precedences::propagator::DetectablePrecedencesPropagator;
+use crate::propagators::propagator_view::DetectablePrecedencesViewPropagator;
 use crate::pumpkin_assert_simple;
 use crate::variables::IntegerVariable;
 
@@ -37,6 +38,7 @@ where
         .collect::<Vec<_>>();
 
     //todo!("Call your Disjunctive propagator here!")
-    DetectablePrecedencesPropagator::new(Rc::new(tasks))
+    //DetectablePrecedencesPropagator::new(Rc::new(tasks))
+    DetectablePrecedencesViewPropagator::new(tasks)
     // Disjunctive::new(start_times, durations)
 }

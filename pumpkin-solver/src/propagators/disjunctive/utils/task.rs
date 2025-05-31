@@ -12,6 +12,7 @@ pub(crate) struct TaskDisj<Var> {
     pub(crate) local_id: LocalId,
 }
 
+
 impl<Var: IntegerVariable + 'static> TaskDisj<Var> {
     pub(crate) fn get_id(task: &Rc<TaskDisj<Var>>) -> usize {
         task.local_id.unpack() as usize
