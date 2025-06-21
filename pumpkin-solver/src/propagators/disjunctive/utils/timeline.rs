@@ -6,6 +6,7 @@ use std::rc::Rc;
 
 use super::TaskDisj;
 use super::UnionFind;
+use crate::engine::propagation::LocalId;
 use crate::{engine::Assignments, variables::IntegerVariable};
 
 pub(crate) struct Timeline {
@@ -14,6 +15,8 @@ pub(crate) struct Timeline {
     pub(crate) m: Vec<i32>,
     pub(crate) e: i32,
     pub(crate) s: UnionFind,
+    pub(crate) u: Vec<Vec<LocalId>>,
+    pub(crate) lower: i32
 }
 
 impl Timeline {
@@ -45,12 +48,15 @@ impl Timeline {
             c.push(t[k + 1] - t[k]);
         }
         let n = t.len();
+        let lower = tasks.iter().map(|task| task.starting_time.lower_bound(assignments)).min().unwrap();
         Timeline {
             t: t,
             c: c,
             m: m,
             e: -1,
             s: UnionFind::new(n as i32),
+            u: vec![vec![]; n],
+            lower: lower,
         }
     }
 
@@ -66,8 +72,18 @@ impl Timeline {
             rho -= delta;
             self.c[k] -= delta;
             if self.c[k] == 0 {
+                let a = k;
                 let _ = self.s.union(k as i32, (k + 1) as i32);
                 k = self.s.find(k as i32) as usize;
+                if a != k{
+                    let b = self.u[a].clone();
+                    self.u[k].extend(b.iter());
+                } else  {
+                   panic!("This should not happen, union-find structure is broken"); 
+                }
+            }
+            if rho == 0 {
+                self.u[k].push(task.local_id);
             }
         }
         self.e = max(self.e, k as i32);
@@ -75,9 +91,17 @@ impl Timeline {
 
     pub(crate) fn earliest_completion_time(&self) -> i32 {
         if self.e == -1 {
-            return 0;
+            return self.lower;
         }
         self.t[(self.e + 1) as usize] - self.c[self.e as usize]
+    }
+
+    pub(crate) fn get_omega(&self) -> Vec<LocalId> {
+        if self.e == -1 {
+            return vec![];
+        }
+        let omega = self.u[self.e as usize].clone();
+        omega
     }
 
     fn print_uf(&mut self) {
@@ -112,6 +136,7 @@ pub(crate) struct RevTimeline {
     pub(crate) m: Vec<i32>,
     pub(crate) e: i32,
     pub(crate) s: UnionFind,
+    pub(crate) u: Vec<Vec<LocalId>>,
 }
 
 impl RevTimeline {
@@ -152,6 +177,7 @@ impl RevTimeline {
             m: m,
             e: -1,
             s: UnionFind::new(n as i32),
+            u: vec![vec![]; n]
         }
     }
 
@@ -167,13 +193,31 @@ impl RevTimeline {
             rho -= delta;
             self.c[k] -= delta;
             if self.c[k] == 0 {
+                let a = k;
                 let _ = self.s.union(k as i32, (k + 1) as i32);
                 k = self.s.find(k as i32) as usize;
+                if a != k {
+                    let b = self.u[a].clone();
+                    self.u[k].extend(b.iter());
+                } else {
+                    panic!("This should not happen, union-find structure is broken");
+                }
+            }
+            if rho == 0 {
+                self.u[k].push(task.local_id);
             }
         }
+    
         self.e = max(self.e, k as i32);
     }
 
+    pub(crate) fn get_omega(&self) -> Vec<LocalId> {
+        if self.e == -1 {
+            return vec![];
+        }
+        let omega = self.u[self.e as usize].clone();
+        omega
+    }
     pub(crate) fn latest_starting_time(&self) -> i32 {
         if self.e == -1 {
             return self.t[0];
@@ -227,18 +271,15 @@ mod tests {
             TaskDisj {
                 starting_time: x,
                 duration: 5,
-                deadline: 15,
                 local_id: LocalId::from(0),
             },
             TaskDisj {
                 starting_time: y,
                 duration: 6,
-                deadline: 10,
                 local_id: LocalId::from(1),
             },
             TaskDisj {
                 starting_time: z,
-                deadline: 8,
                 duration: 2,
                 local_id: LocalId::from(2),
             },
@@ -267,24 +308,20 @@ mod tests {
             TaskDisj {
                 starting_time: w,
                 duration: 4,
-                deadline: 19,
                 local_id: LocalId::from(0),
             },
             TaskDisj {
                 starting_time: x,
                 duration: 9,
-                deadline: 22,
                 local_id: LocalId::from(1),
             },
             TaskDisj {
                 starting_time: y,
                 duration: 7,
-                deadline: 30,
                 local_id: LocalId::from(2),
             },
             TaskDisj {
                 starting_time: z,
-                deadline: 20,
                 duration: 6,
                 local_id: LocalId::from(3),
             },

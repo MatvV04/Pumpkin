@@ -28,6 +28,7 @@ mod boolean;
 mod clause;
 mod constraint_poster;
 mod cumulative;
+mod disjunctive;
 mod element;
 
 use std::num::NonZero;
@@ -39,6 +40,7 @@ pub use clause::*;
 pub use constraint_poster::*;
 pub use cumulative::*;
 pub use element::*;
+pub use disjunctive::*;
 
 use crate::engine::propagation::Propagator;
 use crate::propagators::ReifiedPropagator;
